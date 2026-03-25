@@ -1,0 +1,65 @@
+{
+  "company": {
+    "name": "X-Block",
+    "slogan": "Launch Faster, Build Smarter",
+    "ceo": "한정원",
+    "website": "https://xblock0.com",
+    "portfolio_url": "https://docs.google.com/presentation/d/16AhAmWhQwrAqRMl66S_DdHUJgKAZri-uom97OaUASFQ/edit?usp=sharing",
+    "strengths": [
+      "기획-디자인-개발-QA 원스톱 턴키 개발",
+      "빠른 MVP 출시 (4주~4개월)",
+      "체계적인 10단계 개발 프로세스",
+      "UX/UI 디자인 전문 인력 보유"
+    ],
+    "team": ["App Planning", "UX/UI Design", "Development", "QA Support"],
+    "portfolio": [
+      {
+        "name": "Claim Bridge",
+        "description": "보험금 청구 전문가 매칭 플랫폼. 사용자와 손해사정사를 연결하여 쉽고 빠른 보험금 청구를 돕는 서비스.",
+        "category": "핀테크/보험"
+      },
+      {
+        "name": "PetPle",
+        "description": "반려동물 종합 정보 플랫폼. 카페/숙소/병원 검색, 실시간 후기, 백신 인증, 커뮤니티 기능.",
+        "category": "반려동물/라이프스타일"
+      },
+      {
+        "name": "APEC CEO Summit Korea 2025",
+        "description": "K-Beauty & Wellness 예약 프로그램. 외국인 대상 뷰티/웰니스 체험 예약 및 콘텐츠 플랫폼.",
+        "category": "여행/뷰티"
+      },
+      {
+        "name": "봉선장",
+        "description": "신선 수산물 직거래 커머스 앱. 최적의 구매 여정과 사용성 개선에 초점.",
+        "category": "커머스/식품"
+      },
+      {
+        "name": "Qin Meitian",
+        "description": "외국인 대상 한국 의료 시술 및 사후관리 통합 플랫폼. 다국어 지원.",
+        "category": "헬스케어/의료"
+      },
+      {
+        "name": "실물 NFT 경매 플랫폼",
+        "description": "USDT 기반 실물 자산 연계 NFT 경매 플랫폼. 투명한 경매 과정과 소유권 확인.",
+        "category": "블록체인/NFT"
+      }
+    ]
+  },
+  "filter": {
+    "project_type": "turnkey",
+    "keywords": ["기획", "디자인", "개발", "턴키", "풀패키지", "앱 개발", "앱개발", "웹 개발", "웹개발", "UI/UX"],
+    "min_budget": 10000000,
+    "exclude_keywords": ["단순 수정", "유지보수만", "퍼블리싱만", "상주", "파견", "출퇴근", "현장 근무", "오피스 출근"]
+  },
+  "mode": "semi-auto",
+  "check_interval_minutes": 30,
+  "daily_apply_limit": 9,
+  "daily_apply_limit_per_platform": 3,
+  "apply_delay_seconds": [180, 600],
+  "platforms": {
+    "wishket": { "enabled": false },
+    "kmong": { "enabled": false },
+    "freemoa": { "enabled": true }
+
+  }
+}
