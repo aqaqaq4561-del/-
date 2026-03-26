@@ -49,16 +49,17 @@
     "project_type": "turnkey",
     "keywords": ["기획", "디자인", "개발", "턴키", "풀패키지", "앱 개발", "앱개발", "웹 개발", "웹개발", "UI/UX"],
     "min_budget": 10000000,
-    "exclude_keywords": ["단순 수정", "유지보수만", "퍼블리싱만", "상주", "파견", "출퇴근", "현장 근무", "오피스 출근"]
+    "exclude_keywords": ["단순 수정", "유지보수만", "퍼블리싱만", "상주", "파견", "출퇴근", "현장 근무", "오피스 출근", "프라이빗 매칭", "프라이빗매칭", "기간제", "구인", "채용"]
   },
   "mode": "semi-auto",
   "check_interval_minutes": 30,
+  "crawl_hours": [11],
   "daily_apply_limit": 9,
   "daily_apply_limit_per_platform": 3,
   "apply_delay_seconds": [180, 600],
   "platforms": {
-    "wishket": { "enabled": false },
-    "kmong": { "enabled": false },
+    "wishket": { "enabled": true },
+    "kmong": { "enabled": true },
     "freemoa": { "enabled": true }
 
   }

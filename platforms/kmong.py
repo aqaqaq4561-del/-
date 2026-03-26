@@ -25,6 +25,13 @@ class KmongPlatform(BasePlatform):
             await self.page.wait_for_load_state("networkidle", timeout=15000)
             await asyncio.sleep(2)
 
+            # 이미 로그인된 상태인지 확인
+            # "주문 관리"가 보이면 로그인된 상태 (태그 무관하게 텍스트로 확인)
+            already_logged = await self.page.get_by_text("주문 관리").count()
+            if already_logged:
+                print("[Kmong] 이미 로그인된 상태 (세션 유지)")
+                return True
+
             # 상단 로그인 링크 클릭
             login_link = self.page.locator(
                 'a:has-text("로그인"):visible, '

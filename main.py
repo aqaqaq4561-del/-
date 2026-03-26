@@ -98,23 +98,54 @@ def get_profile_dir(platform_name: str) -> Path:
     return BROWSER_PROFILES_DIR / platform_name
 
 
-async def create_context(playwright, platform_name: str = ""):
-    """persistent context 생성 — 브라우저 프로필 유지"""
+def _kill_chrome_for_profile(profile_dir: str):
+    """해당 프로필을 사용 중인 Chrome 프로세스 강제 종료"""
+    import subprocess
+    try:
+        # Windows: 해당 user-data-dir을 쓰는 chrome 프로세스 찾아서 종료
+        result = subprocess.run(
+            ["wmic", "process", "where",
+             f"commandline like '%{Path(profile_dir).name}%' and name='chrome.exe'",
+             "get", "processid"],
+            capture_output=True, text=True, timeout=10
+        )
+        for line in result.stdout.strip().split("\n"):
+            line = line.strip()
+            if line.isdigit():
+                subprocess.run(["taskkill", "/F", "/PID", line],
+                               capture_output=True, timeout=5)
+                print(f"[Browser] 잔여 Chrome 프로세스 종료: PID {line}")
+    except Exception:
+        pass
+
+
+async def create_context(playwright, platform_name: str = "", max_retries: int = 3):
+    """persistent context 생성 — 브라우저 프로필 유지 (충돌 시 재시도)"""
     profile_dir = get_profile_dir(platform_name) if platform_name else BROWSER_PROFILES_DIR / "_default"
     profile_dir.mkdir(exist_ok=True)
-    context = await playwright.chromium.launch_persistent_context(
-        user_data_dir=str(profile_dir),
-        headless=False,
-        args=["--disable-blink-features=AutomationControlled"],
-        viewport={"width": 1280, "height": 720},
-        user_agent=(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/131.0.0.0 Safari/537.36"
-        ),
-    )
-    print(f"[{platform_name}] 브라우저 프로필: {profile_dir}")
-    return context
+
+    for attempt in range(max_retries):
+        try:
+            context = await playwright.chromium.launch_persistent_context(
+                user_data_dir=str(profile_dir),
+                headless=False,
+                args=["--disable-blink-features=AutomationControlled"],
+                viewport={"width": 1280, "height": 720},
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/131.0.0.0 Safari/537.36"
+                ),
+            )
+            print(f"[{platform_name}] 브라우저 프로필: {profile_dir}")
+            return context
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"[{platform_name}] 브라우저 열기 실패 (시도 {attempt+1}/{max_retries}): {e}")
+                _kill_chrome_for_profile(str(profile_dir))
+                await asyncio.sleep(3)
+            else:
+                raise
 
 
 async def save_session(context, platform_name: str):
@@ -251,7 +282,20 @@ async def run_once(test_mode: bool = False):
             per_platform_limit = CONFIG.get("daily_apply_limit_per_platform", 3)
             delay_range = CONFIG.get("apply_delay_seconds", [180, 600])
 
+            # 이미 pending/submitted된 프로젝트 ID 목록
+            existing_pending = load_pending()
+            existing_ids = {
+                item["project"]["project_id"]
+                for item in existing_pending
+                if item["status"] in ("pending", "submitted")
+            }
+
             for proj in filtered:
+                # 이미 pending 또는 submitted면 스킵
+                if proj.project_id in existing_ids:
+                    print(f"[{platform.name}] 이미 처리됨 (스킵): {proj.title}")
+                    continue
+
                 # 지원서 생성
                 print(f"\n[{platform.name}] 지원서 생성 중: {proj.title}")
                 proposal = generate_proposal(proj.to_dict())
@@ -312,26 +356,26 @@ async def run_once(test_mode: bool = False):
             )
 
 
-async def approve_and_submit(project_id: str):
-    """승인된 프로젝트에 지원서 제출"""
+async def approve_and_submit(project_id: str) -> bool:
+    """승인된 프로젝트에 지원서 제출. 성공 시 True 반환."""
     daily_limit = CONFIG.get("daily_apply_limit", 9)
     per_platform_limit = CONFIG.get("daily_apply_limit_per_platform", 3)
 
     pending = load_pending()
     target = None
     for item in pending:
-        if item["project"]["project_id"] == project_id:
+        if item["project"]["project_id"] == project_id and item["status"] == "pending":
             target = item
             break
 
     if not target:
         print(f"프로젝트 ID '{project_id}'를 찾을 수 없습니다.")
-        return
+        return False
 
     plat_name = target["project"]["platform"]
     if not can_apply(daily_limit, plat_name, per_platform_limit):
         print("일일 지원 제한에 도달했습니다. 내일 다시 시도하세요.")
-        return
+        return False
 
     async with async_playwright() as p:
         platform_map = {
@@ -350,7 +394,7 @@ async def approve_and_submit(project_id: str):
         if not logged_in:
             print("로그인 실패")
             await context.close()
-            return
+            return False
 
         project = Project(**proj_data)
         success = await platform.apply(project, target["proposal"])
@@ -367,6 +411,7 @@ async def approve_and_submit(project_id: str):
             print(f"❌ 지원 실패: {project.title}")
 
         await context.close()
+        return success
 
 
 async def modify_application(project_id: str):
@@ -452,17 +497,114 @@ async def main():
 
     elif "--loop" in args:
         interval = CONFIG.get("check_interval_minutes", 30) * 60
-        print(f"🔄 반복 모드: {interval // 60}분 간격으로 실행합니다.")
+        print(f"반복 모드: {interval // 60}분 간격으로 실행합니다.")
         while True:
             try:
                 await run_once()
             except Exception as e:
                 print(f"에러 발생: {e}")
-            print(f"\n⏳ {interval // 60}분 후 다시 실행합니다...")
+            print(f"\n{interval // 60}분 후 다시 실행합니다...")
             await asyncio.sleep(interval)
+
+    elif "--watch" in args:
+        await watch_mode()
 
     else:
         await run_once()
+
+
+async def watch_mode():
+    """크롤링 + 텔레그램 승인 폴링 통합 모드
+    - 매일 지정 시간(기본 11:00)에 크롤링
+    - 10초마다 텔레그램 승인 메시지 확인
+    """
+    crawl_hours = CONFIG.get("crawl_hours", [11])  # 크롤링 시간 (24시간제)
+    poll_interval = 10
+
+    print(f"[Watch] 감시 모드 시작")
+    print(f"  크롤링 시간: 매일 {crawl_hours}시")
+    print(f"  텔레그램 폴링: {poll_interval}초 간격")
+    print(f"  텔레그램에서 '승인 [프로젝트ID]' 또는 '전체승인' 보내면 자동 지원")
+
+    send_telegram(
+        f"[X-Block Auto Apply]\n"
+        f"감시 모드 시작됨\n\n"
+        f"크롤링: 매일 {crawl_hours}시\n"
+        f"승인 대기 프로젝트가 알림으로 오면\n"
+        f"'승인 [ID]' 로 답장하세요.\n"
+        f"'전체승인' 하면 전부 지원합니다."
+    )
+
+    crawled_today = set()  # 오늘 이미 크롤링한 시간
+    while True:
+        try:
+            now = datetime.now()
+            today_key = now.strftime("%Y-%m-%d")
+            current_hour = now.hour
+
+            # 1. 지정 시간에 크롤링 (해당 시간에 1회만)
+            if current_hour in crawl_hours and f"{today_key}_{current_hour}" not in crawled_today:
+                crawled_today.add(f"{today_key}_{current_hour}")
+                # 날짜 바뀌면 초기화
+                crawled_today = {k for k in crawled_today if k.startswith(today_key)}
+                print(f"\n[Watch] {now.strftime('%H:%M')} 크롤링 시작...")
+                try:
+                    await run_once()
+                except Exception as e:
+                    print(f"[Watch] 크롤링 에러: {e}")
+                    send_telegram(f"[WARN] 크롤링 에러: {e}")
+
+            # 2. 텔레그램 승인 메시지 확인
+            approved = check_approvals()
+            if approved:
+                pending = load_pending()
+                pending_only = [p for p in pending if p["status"] == "pending"]
+
+                for aid in approved:
+                    if aid == "__ALL__":
+                        # 전체 승인
+                        print(f"[Watch] 전체 승인 요청!")
+                        send_telegram("전체 승인 처리 시작합니다...")
+                        for item in pending_only:
+                            pid = item["project"]["project_id"]
+                            title = item["project"]["title"]
+                            print(f"[Watch] 지원 시작: {title}")
+                            try:
+                                success = await approve_and_submit(pid)
+                                if success:
+                                    send_telegram(f"[OK] 지원 완료: {title}")
+                                else:
+                                    send_telegram(f"[FAIL] 지원 실패: {title}\n수동 확인 필요")
+                            except Exception as e:
+                                print(f"[Watch] 지원 에러: {e}")
+                                send_telegram(f"[FAIL] 지원 실패: {title}\n{e}")
+                        break
+                    else:
+                        # 개별 승인
+                        target = next(
+                            (p for p in pending_only if p["project"]["project_id"] == aid),
+                            None,
+                        )
+                        if target:
+                            title = target["project"]["title"]
+                            print(f"[Watch] 승인: {title} ({aid})")
+                            send_telegram(f"승인 접수: {title}\n지원 처리 중...")
+                            try:
+                                success = await approve_and_submit(aid)
+                                if success:
+                                    send_telegram(f"[OK] 지원 완료: {title}")
+                                else:
+                                    send_telegram(f"[FAIL] 지원 실패: {title}\n수동 확인 필요")
+                            except Exception as e:
+                                print(f"[Watch] 지원 에러: {e}")
+                                send_telegram(f"[FAIL] 지원 실패: {title}\n{e}")
+                        else:
+                            send_telegram(f"프로젝트 ID '{aid}'를 찾을 수 없습니다.")
+
+        except Exception as e:
+            print(f"[Watch] 에러: {e}")
+
+        await asyncio.sleep(poll_interval)
 
 
 if __name__ == "__main__":
