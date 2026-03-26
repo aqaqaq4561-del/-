@@ -324,16 +324,15 @@ async def run_once(test_mode: bool = False):
                         # 다음 지원 전 랜덤 딜레이
                         await apply_delay(delay_range)
                 else:
-                    # 반자동: 대기 목록에 추가
+                    # 반자동: 대기 목록에 추가 (텔레그램 알림은 watch_mode에서 하나씩)
                     item = {
                         "project": proj.to_dict(),
                         "proposal": proposal,
                         "status": "pending",
+                        "notified": False,
                         "created_at": datetime.now().isoformat(),
                     }
                     all_filtered.append(item)
-                    # 텔레그램으로 지원서 확인 요청
-                    notify_proposal_ready(proj.to_dict(), proposal)
                     print(f"[{platform.name}] 📝 승인 대기: {proj.title}")
 
             await context.close()
@@ -524,18 +523,21 @@ async def watch_mode():
     print(f"[Watch] 감시 모드 시작")
     print(f"  크롤링 시간: 매일 {crawl_hours}시")
     print(f"  텔레그램 폴링: {poll_interval}초 간격")
-    print(f"  텔레그램에서 '승인 [프로젝트ID]' 또는 '전체승인' 보내면 자동 지원")
 
     send_telegram(
         f"[X-Block Auto Apply]\n"
         f"감시 모드 시작됨\n\n"
         f"크롤링: 매일 {crawl_hours}시\n"
-        f"승인 대기 프로젝트가 알림으로 오면\n"
-        f"'승인 [ID]' 로 답장하세요.\n"
-        f"'전체승인' 하면 전부 지원합니다."
+        f"프로젝트를 하나씩 보내드립니다.\n\n"
+        f"'승인 [ID]' — 지원\n"
+        f"'거절 [ID]' — 거절\n"
+        f"'패스' 또는 '다음' — 스킵 후 다음\n"
+        f"'전체승인' — 전부 지원"
     )
 
     crawled_today = set()  # 오늘 이미 크롤링한 시간
+    waiting_response = False  # 현재 응답 대기 중인지
+
     while True:
         try:
             now = datetime.now()
@@ -545,7 +547,6 @@ async def watch_mode():
             # 1. 지정 시간에 크롤링 (해당 시간에 1회만)
             if current_hour in crawl_hours and f"{today_key}_{current_hour}" not in crawled_today:
                 crawled_today.add(f"{today_key}_{current_hour}")
-                # 날짜 바뀌면 초기화
                 crawled_today = {k for k in crawled_today if k.startswith(today_key)}
                 print(f"\n[Watch] {now.strftime('%H:%M')} 크롤링 시작...")
                 try:
@@ -553,53 +554,92 @@ async def watch_mode():
                 except Exception as e:
                     print(f"[Watch] 크롤링 에러: {e}")
                     send_telegram(f"[WARN] 크롤링 에러: {e}")
+                waiting_response = False  # 크롤링 후 새 프로젝트 알림 시작
 
-            # 2. 텔레그램 승인 메시지 확인
-            approved = check_approvals()
-            if approved:
+            # 2. 응답 대기 중이 아니면 — 미알림 pending 하나 보내기
+            if not waiting_response:
                 pending = load_pending()
-                pending_only = [p for p in pending if p["status"] == "pending"]
+                unnotified = next(
+                    (item for item in pending
+                     if item["status"] == "pending" and not item.get("notified")),
+                    None,
+                )
+                if unnotified:
+                    proj = unnotified["project"]
+                    proposal = unnotified["proposal"]
+                    notify_proposal_ready(proj, proposal)
+                    unnotified["notified"] = True
+                    save_pending(pending)
+                    waiting_response = True
+                    remaining = sum(1 for p in pending
+                                    if p["status"] == "pending" and not p.get("notified"))
+                    print(f"[Watch] 알림 전송: {proj['title']} (남은 {remaining}건)")
 
-                for aid in approved:
-                    if aid == "__ALL__":
-                        # 전체 승인
-                        print(f"[Watch] 전체 승인 요청!")
-                        send_telegram("전체 승인 처리 시작합니다...")
-                        for item in pending_only:
-                            pid = item["project"]["project_id"]
-                            title = item["project"]["title"]
-                            print(f"[Watch] 지원 시작: {title}")
-                            try:
-                                success = await approve_and_submit(pid)
-                                if success:
-                                    send_telegram(f"[OK] 지원 완료: {title}")
-                                else:
-                                    send_telegram(f"[FAIL] 지원 실패: {title}\n수동 확인 필요")
-                            except Exception as e:
-                                print(f"[Watch] 지원 에러: {e}")
-                                send_telegram(f"[FAIL] 지원 실패: {title}\n{e}")
-                        break
+            # 3. 텔레그램 응답 확인
+            commands = check_approvals()
+            for cmd in commands:
+                action = cmd["action"]
+                aid = cmd["id"]
+
+                if action == "approve_all":
+                    print(f"[Watch] 전체 승인 요청!")
+                    send_telegram("전체 승인 처리 시작합니다...")
+                    pending = load_pending()
+                    for item in pending:
+                        if item["status"] != "pending":
+                            continue
+                        pid = item["project"]["project_id"]
+                        title = item["project"]["title"]
+                        try:
+                            success = await approve_and_submit(pid)
+                            if success:
+                                send_telegram(f"[OK] 지원 완료: {title}")
+                            else:
+                                send_telegram(f"[FAIL] 지원 실패: {title}\n수동 확인 필요")
+                        except Exception as e:
+                            send_telegram(f"[FAIL] 지원 실패: {title}\n{e}")
+                    waiting_response = False
+
+                elif action == "approve":
+                    pending = load_pending()
+                    target = next(
+                        (p for p in pending if p["project"]["project_id"] == aid and p["status"] == "pending"),
+                        None,
+                    )
+                    if target:
+                        title = target["project"]["title"]
+                        print(f"[Watch] 승인: {title} ({aid})")
+                        send_telegram(f"승인 접수: {title}\n지원 처리 중...")
+                        try:
+                            success = await approve_and_submit(aid)
+                            if success:
+                                send_telegram(f"[OK] 지원 완료: {title}")
+                            else:
+                                send_telegram(f"[FAIL] 지원 실패: {title}\n수동 확인 필요")
+                        except Exception as e:
+                            send_telegram(f"[FAIL] 지원 실패: {title}\n{e}")
                     else:
-                        # 개별 승인
-                        target = next(
-                            (p for p in pending_only if p["project"]["project_id"] == aid),
-                            None,
-                        )
-                        if target:
-                            title = target["project"]["title"]
-                            print(f"[Watch] 승인: {title} ({aid})")
-                            send_telegram(f"승인 접수: {title}\n지원 처리 중...")
-                            try:
-                                success = await approve_and_submit(aid)
-                                if success:
-                                    send_telegram(f"[OK] 지원 완료: {title}")
-                                else:
-                                    send_telegram(f"[FAIL] 지원 실패: {title}\n수동 확인 필요")
-                            except Exception as e:
-                                print(f"[Watch] 지원 에러: {e}")
-                                send_telegram(f"[FAIL] 지원 실패: {title}\n{e}")
-                        else:
-                            send_telegram(f"프로젝트 ID '{aid}'를 찾을 수 없습니다.")
+                        send_telegram(f"프로젝트 ID '{aid}'를 찾을 수 없습니다.")
+                    waiting_response = False  # 다음 프로젝트 보내기
+
+                elif action == "reject":
+                    pending = load_pending()
+                    target = next(
+                        (p for p in pending if p["project"]["project_id"] == aid and p["status"] == "pending"),
+                        None,
+                    )
+                    if target:
+                        title = target["project"]["title"]
+                        target["status"] = "rejected"
+                        save_pending(pending)
+                        send_telegram(f"거절됨: {title}")
+                        print(f"[Watch] 거절: {title} ({aid})")
+                    else:
+                        send_telegram(f"프로젝트 ID '{aid}'를 찾을 수 없습니다.")
+                    waiting_response = False  # 다음 프로젝트 보내기
+
+                elif action == "skip":
+                    waiting_response = False  # 다음 프로젝트 보내기
 
         except Exception as e:
             print(f"[Watch] 에러: {e}")

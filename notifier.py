@@ -185,15 +185,17 @@ def notify_summary(total: int, filtered: int, pending: int):
     send_telegram(msg)
 
 
-def check_approvals() -> list[str]:
-    """텔레그램에서 승인 메시지 확인"""
+def check_approvals() -> list[dict]:
+    """텔레그램에서 승인/거절 메시지 확인.
+    반환: [{"action": "approve"|"reject"|"skip"|"approve_all", "id": "..."}]
+    """
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates"
     try:
         req = urllib.request.Request(url)
         resp = urllib.request.urlopen(req, timeout=10)
         result = json.loads(resp.read().decode())
 
-        approved_ids = []
+        commands = []
         if result.get("ok"):
             for update in result.get("result", []):
                 msg = update.get("message", {})
@@ -205,9 +207,14 @@ def check_approvals() -> list[str]:
 
                 if text.startswith("승인 "):
                     project_id = text.replace("승인 ", "").strip()
-                    approved_ids.append(project_id)
+                    commands.append({"action": "approve", "id": project_id})
+                elif text.startswith("거절 ") or text.startswith("거부 "):
+                    project_id = text.split(" ", 1)[1].strip()
+                    commands.append({"action": "reject", "id": project_id})
+                elif text in ("패스", "다음", "스킵"):
+                    commands.append({"action": "skip", "id": ""})
                 elif text == "전체승인":
-                    approved_ids.append("__ALL__")
+                    commands.append({"action": "approve_all", "id": ""})
 
             # 읽은 메시지 확인 처리
             if result.get("result"):
@@ -215,7 +222,7 @@ def check_approvals() -> list[str]:
                 confirm_url = f"{url}?offset={last_id + 1}"
                 urllib.request.urlopen(confirm_url, timeout=5)
 
-        return approved_ids
+        return commands
 
     except Exception as e:
         print(f"[Telegram] 승인 확인 실패: {e}")
