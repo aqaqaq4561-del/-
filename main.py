@@ -19,7 +19,7 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="repla
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 # .env 먼저 로드 (notifier 등에서 os.getenv 사용)
@@ -71,7 +71,7 @@ def load_pending() -> list[dict]:
 def save_pending(pending: list[dict]):
     # 중복 제거 + 14일 지난 submitted/rejected 정리
     seen = {}
-    cutoff = (datetime.now() - __import__('datetime').timedelta(days=14)).isoformat()
+    cutoff = (datetime.now() - timedelta(days=14)).isoformat()
     for item in pending:
         pid = item["project"]["project_id"]
         status = item["status"]
@@ -256,6 +256,7 @@ async def run_once(test_mode: bool = False):
             platform_classes.append(FreemoaPlatform)
 
         all_filtered = []
+        platform_stats = {}  # 플랫폼별 수집/필터/신규 통계
 
         for PlatformClass in platform_classes:
             # 플랫폼별 persistent context
@@ -292,6 +293,8 @@ async def run_once(test_mode: bool = False):
             # 필터링
             filtered = [p for p in projects if p.matches_filter(CONFIG["filter"])]
             print(f"[{platform.name}] 필터 통과: {len(filtered)}개")
+
+            platform_stats[platform.name] = {"crawled": len(projects), "filtered": len(filtered), "new": 0}
 
             daily_limit = CONFIG.get("daily_apply_limit", 9)
             per_platform_limit = CONFIG.get("daily_apply_limit_per_platform", 3)
@@ -348,6 +351,7 @@ async def run_once(test_mode: bool = False):
                         "created_at": datetime.now().isoformat(),
                     }
                     all_filtered.append(item)
+                    platform_stats[platform.name]["new"] += 1
                     print(f"[{platform.name}] 📝 승인 대기: {proj.title}")
 
             await context.close()
@@ -364,7 +368,15 @@ async def run_once(test_mode: bool = False):
                 print(f"{'='*50}")
             else:
                 print("\n새 공고 없음")
-                send_telegram("[X-Block Auto Apply]\n크롤링 완료 — 새 공고가 없습니다.")
+                stats_lines = "\n".join(
+                    f"  {name}: {s['crawled']}개 수집 → {s['filtered']}개 통과 → 신규 {s['new']}개"
+                    for name, s in platform_stats.items()
+                )
+                send_telegram(
+                    f"[X-Block Auto Apply]\n"
+                    f"크롤링 완료 — 새 공고가 없습니다.\n\n"
+                    f"{stats_lines}"
+                )
 
 
 async def approve_and_submit(project_id: str) -> bool:
