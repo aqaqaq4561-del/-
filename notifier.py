@@ -11,9 +11,17 @@ from pathlib import Path
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = int(os.getenv("TELEGRAM_CHAT_ID", "0"))
 
+if not TELEGRAM_BOT_TOKEN:
+    print("[Telegram] WARNING: TELEGRAM_BOT_TOKEN이 설정되지 않음 (.env 확인)")
+if not TELEGRAM_CHAT_ID:
+    print("[Telegram] WARNING: TELEGRAM_CHAT_ID가 설정되지 않음 (.env 확인)")
+
 
 def send_telegram(text: str, parse_mode: str = None) -> bool:
     """텔레그램으로 메시지 전송 (4096자 초과 시 분할)"""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("[Telegram] 토큰/채팅ID 없음 — 전송 스킵")
+        return False
     MAX_LEN = 4000  # 여유 두고 4000자
     chunks = []
     if len(text) <= MAX_LEN:

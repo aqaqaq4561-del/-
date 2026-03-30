@@ -129,7 +129,13 @@ class KmongPlatform(BasePlatform):
                     )
                     detail_url = self.page.url
                     id_match = re.search(r"/requests/(\d+)", detail_url)
-                    pid = id_match.group(1) if id_match else str(hash(title))[:10]
+                    if not id_match:
+                        print(f"[Kmong] 프로젝트 ID 추출 실패 (스킵): {title[:30]}")
+                        await self.page.go_back()
+                        await self.page.wait_for_load_state("networkidle", timeout=10000)
+                        await asyncio.sleep(1)
+                        continue
+                    pid = id_match.group(1)
 
                     await self.page.go_back()
                     await self.page.wait_for_load_state("networkidle", timeout=10000)

@@ -69,9 +69,24 @@ def load_pending() -> list[dict]:
 
 
 def save_pending(pending: list[dict]):
+    # 중복 제거 + 14일 지난 submitted/rejected 정리
+    seen = {}
+    cutoff = (datetime.now() - __import__('datetime').timedelta(days=14)).isoformat()
+    for item in pending:
+        pid = item["project"]["project_id"]
+        status = item["status"]
+        if pid not in seen:
+            seen[pid] = item
+        elif status == "submitted" and seen[pid]["status"] != "submitted":
+            seen[pid] = item
+    cleaned = [
+        item for item in seen.values()
+        if item["status"] == "pending"
+        or item.get("created_at", "") > cutoff
+    ]
     PENDING_FILE.parent.mkdir(exist_ok=True)
     with open(PENDING_FILE, "w", encoding="utf-8") as f:
-        json.dump(pending, f, ensure_ascii=False, indent=2)
+        json.dump(cleaned, f, ensure_ascii=False, indent=2)
 
 
 def format_project_summary(project: Project, proposal: str) -> str:
@@ -115,8 +130,8 @@ def _kill_chrome_for_profile(profile_dir: str):
                 subprocess.run(["taskkill", "/F", "/PID", line],
                                capture_output=True, timeout=5)
                 print(f"[Browser] 잔여 Chrome 프로세스 종료: PID {line}")
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[Browser] Chrome 정리 에러: {e}")
 
 
 async def create_context(playwright, platform_name: str = "", max_retries: int = 3):
