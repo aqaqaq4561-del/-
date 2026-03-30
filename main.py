@@ -338,21 +338,18 @@ async def run_once(test_mode: bool = False):
             await context.close()
 
         # 반자동 모드: 대기 목록 저장
-        if CONFIG["mode"] == "semi-auto" and all_filtered:
-            existing = load_pending()
-            existing.extend(all_filtered)
-            save_pending(existing)
-            print(f"\n{'='*50}")
-            print(f"총 {len(all_filtered)}개 프로젝트가 승인 대기 중입니다.")
-            print(f"파일: {PENDING_FILE}")
-            print(f"{'='*50}")
-
-            # 텔레그램 요약 알림
-            notify_summary(
-                total=sum(1 for _ in all_filtered),
-                filtered=len(all_filtered),
-                pending=len(all_filtered),
-            )
+        if CONFIG["mode"] == "semi-auto":
+            if all_filtered:
+                existing = load_pending()
+                existing.extend(all_filtered)
+                save_pending(existing)
+                print(f"\n{'='*50}")
+                print(f"총 {len(all_filtered)}개 프로젝트가 승인 대기 중입니다.")
+                print(f"파일: {PENDING_FILE}")
+                print(f"{'='*50}")
+            else:
+                print("\n새 공고 없음")
+                send_telegram("[X-Block Auto Apply]\n크롤링 완료 — 새 공고가 없습니다.")
 
 
 async def approve_and_submit(project_id: str) -> bool:
