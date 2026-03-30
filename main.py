@@ -524,16 +524,26 @@ async def watch_mode():
     print(f"  크롤링 시간: 매일 {crawl_hours}시")
     print(f"  텔레그램 폴링: {poll_interval}초 간격")
 
-    send_telegram(
-        f"[X-Block Auto Apply]\n"
-        f"감시 모드 시작됨\n\n"
-        f"크롤링: 매일 {crawl_hours}시\n"
-        f"프로젝트를 하나씩 보내드립니다.\n\n"
-        f"'승인 [ID]' — 지원\n"
-        f"'거절 [ID]' — 거절\n"
-        f"'패스' 또는 '다음' — 스킵 후 다음\n"
-        f"'전체승인' — 전부 지원"
-    )
+    # 시작 메시지 중복 방지 — 마지막 전송 시간 기록
+    start_msg_file = DATA_DIR / "watch_start_msg.txt"
+    now_str = datetime.now().strftime("%Y-%m-%d %H")
+    last_start_msg = ""
+    if start_msg_file.exists():
+        last_start_msg = start_msg_file.read_text().strip()
+    if last_start_msg != now_str:
+        send_telegram(
+            f"[X-Block Auto Apply]\n"
+            f"감시 모드 시작됨\n\n"
+            f"크롤링: 매일 {crawl_hours}시\n"
+            f"프로젝트를 하나씩 보내드립니다.\n\n"
+            f"'승인 [ID]' — 지원\n"
+            f"'거절 [ID]' — 거절\n"
+            f"'패스' 또는 '다음' — 스킵 후 다음\n"
+            f"'전체승인' — 전부 지원"
+        )
+        start_msg_file.write_text(now_str)
+    else:
+        print("[Watch] 시작 메시지 중복 — 스킵")
 
     crawled_today = set()  # 오늘 이미 크롤링한 시간
     waiting_response = False  # 현재 응답 대기 중인지

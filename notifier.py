@@ -8,8 +8,8 @@ import urllib.request
 from pathlib import Path
 
 
-TELEGRAM_BOT_TOKEN = "8018409801:AAEWvekJb60OSIuSAKfXrRJNAjitvC9RXI8"
-TELEGRAM_CHAT_ID = 8546568283
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = int(os.getenv("TELEGRAM_CHAT_ID", "0"))
 
 
 def send_telegram(text: str, parse_mode: str = None) -> bool:
