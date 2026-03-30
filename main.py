@@ -22,7 +22,10 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+# .env 먼저 로드 (notifier 등에서 os.getenv 사용)
 from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent / ".env")
+
 from playwright.async_api import async_playwright
 
 from platforms import WishketPlatform, KmongPlatform, FreemoaPlatform
@@ -39,9 +42,6 @@ from notifier import (
     check_approvals,
     send_telegram,
 )
-
-# .env 로드
-load_dotenv(Path(__file__).parent / ".env")
 
 # config 로드
 CONFIG_PATH = Path(__file__).parent / "config.json"
