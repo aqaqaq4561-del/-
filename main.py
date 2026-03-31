@@ -13,9 +13,10 @@ import asyncio
 import io
 import sys
 
-# Windows 콘솔 UTF-8 출력
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+# Windows 콘솔 UTF-8 출력 (Windows 전용)
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 import json
 import os
 import sys
@@ -143,7 +144,7 @@ async def create_context(playwright, platform_name: str = "", max_retries: int =
         try:
             context = await playwright.chromium.launch_persistent_context(
                 user_data_dir=str(profile_dir),
-                headless=False,
+                headless=True,
                 args=["--disable-blink-features=AutomationControlled"],
                 viewport={"width": 1280, "height": 720},
                 user_agent=(
@@ -258,6 +259,13 @@ async def run_once(test_mode: bool = False):
         all_filtered = []
         platform_stats = {}  # 플랫폼별 수집/필터/신규 통계
 
+        # 이미 pending/submitted된 프로젝트 ID 목록 (플랫폼 루프 전에 한 번만 로드)
+        existing_pending = load_pending()
+        existing_ids = {
+            item["project"]["project_id"]
+            for item in existing_pending
+            if item["status"] in ("pending", "submitted")
+        }
         for PlatformClass in platform_classes:
             # 플랫폼별 persistent context
             platform_name = PlatformClass.name
@@ -299,14 +307,6 @@ async def run_once(test_mode: bool = False):
             daily_limit = CONFIG.get("daily_apply_limit", 9)
             per_platform_limit = CONFIG.get("daily_apply_limit_per_platform", 3)
             delay_range = CONFIG.get("apply_delay_seconds", [180, 600])
-
-            # 이미 pending/submitted된 프로젝트 ID 목록
-            existing_pending = load_pending()
-            existing_ids = {
-                item["project"]["project_id"]
-                for item in existing_pending
-                if item["status"] in ("pending", "submitted")
-            }
 
             for proj in filtered:
                 # 이미 pending 또는 submitted면 스킵
@@ -351,6 +351,7 @@ async def run_once(test_mode: bool = False):
                         "created_at": datetime.now().isoformat(),
                     }
                     all_filtered.append(item)
+                    existing_ids.add(proj.project_id)  # 즉시 중복 방지
                     platform_stats[platform.name]["new"] += 1
                     print(f"[{platform.name}] 📝 승인 대기: {proj.title}")
 

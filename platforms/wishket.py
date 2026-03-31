@@ -26,38 +26,47 @@ class WishketPlatform(BasePlatform):
             try:
                 await self.page.wait_for_load_state("networkidle", timeout=15000)
             except Exception:
-                pass  # networkidle 타임아웃은 무시
-            await asyncio.sleep(2)
+                pass
+            await asyncio.sleep(3)
 
             current_url = self.page.url
             if "login" not in current_url.lower() and "wishket.com" in current_url:
-                print("[Wishket] 이미 로그인된 상태 (세션 유지)")
-                return True
+                # 공개 페이지이므로 URL만으로는 판별 불가. "로그아웃" 또는 프로필 이미지가 있는지 확인
+                is_logged_in_ui = await self.page.locator("a[href*='/logout/'], a:has-text('로그아웃'), img.profile-img").count() > 0
+                if is_logged_in_ui:
+                    print("[Wishket] 이미 로그인된 상태 (세션 유지)")
+                    return True
+                else:
+                    print("[Wishket] UI 상 로그아웃 상태 확인됨 - 로그인 진행")
 
-            # 로그인 필요
-            await self.page.goto("https://auth.wishket.com/login", timeout=30000)
+            # 메인페이지 방문 후 직접 로그인 버튼 클릭 (SSO CSRF/OIDC flow 트리거)
+            print("[Wishket] WWW 메인 홈에서 SSO 로그인 버튼 클릭 시도")
+            await self.page.goto("https://www.wishket.com/", timeout=30000)
             try:
                 await self.page.wait_for_load_state("networkidle", timeout=15000)
             except Exception:
                 pass
-            await asyncio.sleep(2)
+
+            # 우측 상단이나 메뉴의 "로그인" 버튼 찾기
+            login_link = self.page.locator("a:has-text('로그인')").first
+            if await login_link.count() > 0:
+                await login_link.click()
+            else:
+                # 안 보이면 강제 이동 (fallback)
+                await self.page.goto("https://www.wishket.com/accounts/login/")
+
+            try:
+                await self.page.wait_for_load_state("networkidle", timeout=15000)
+            except Exception:
+                pass
+            await asyncio.sleep(3)
 
             # 로그인 페이지가 아니면 이미 로그인됨 (리다이렉트)
             if "login" not in self.page.url.lower():
-                print("[Wishket] 로그인 성공 (리다이렉트)")
+                print("[Wishket] 로그인 성공 (이미 인증됨)")
                 return True
 
-            # 페이지의 모든 input 찾기 (디버깅)
-            inputs = await self.page.locator("input").all()
-            print(f"[Wishket] Found {len(inputs)} inputs")
-            for inp in inputs:
-                inp_type = await inp.get_attribute("type") or ""
-                inp_name = await inp.get_attribute("name") or ""
-                inp_ph = await inp.get_attribute("placeholder") or ""
-                inp_visible = await inp.is_visible()
-                print(f"  type={inp_type} name={inp_name} placeholder={inp_ph} visible={inp_visible}")
-
-            # 첫번째 visible input = 아이디
+            # 여기가 auth.wishket.com/login... 임을 확신할 수 있음
             visible_inputs = self.page.locator("input:visible")
             count = await visible_inputs.count()
             print(f"[Wishket] Visible inputs: {count}")
@@ -96,7 +105,15 @@ class WishketPlatform(BasePlatform):
             # 로그인 확인
             current_url = self.page.url
             if "login" not in current_url.lower():
-                print("[Wishket] 로그인 성공")
+                print("[Wishket] 로그인 성공 — www.wishket.com으로 이동해 세션 정착 대기")
+                # auth.wishket.com → www.wishket.com 세션 동기화
+                await self.page.goto("https://www.wishket.com/project/", timeout=30000)
+                try:
+                    await self.page.wait_for_load_state("networkidle", timeout=15000)
+                except Exception:
+                    pass
+                await asyncio.sleep(3)
+                print(f"[Wishket] 세션 정착 완료 (URL: {self.page.url})")
                 return True
 
             print("[Wishket] 로그인 실패 - URL 확인:", current_url)
@@ -111,6 +128,11 @@ class WishketPlatform(BasePlatform):
     async def fetch_projects(self) -> list[Project]:
         projects = []
         try:
+            # 브라우저/페이지 상태 확인
+            if self.page.is_closed():
+                print("[Wishket] 페이지가 닫혀있음 — 크롤링 스킵")
+                return projects
+
             # 외주(도급) 탭 직접 접근
             await self.page.goto("https://www.wishket.com/project/", timeout=30000)
             await self.page.wait_for_load_state("networkidle", timeout=15000)
@@ -442,8 +464,28 @@ class WishketPlatform(BasePlatform):
                 print(f"[Wishket] URL 없음: {project.title}")
                 return False
 
-            # 지원 폼 URL로 직접 이동
             apply_url = project.url.rstrip("/") + "/proposal/apply/"
+
+            # apply() 진입 시 먼저 로그인 상태 직접 확인 (세션 꼬임 방지)
+            print("[Wishket] 로그인 상태 확인 중...")
+            await self.page.goto("https://www.wishket.com/project/", timeout=30000)
+            try:
+                await self.page.wait_for_load_state("networkidle", timeout=10000)
+            except Exception:
+                pass
+            await asyncio.sleep(2)
+
+            is_logged_in = "login" not in self.page.url.lower() and "wishket.com" in self.page.url
+            if not is_logged_in:
+                print("[Wishket] 세션 없음 — 로그인 시도")
+                logged_in = await self.login()
+                if not logged_in:
+                    print("[Wishket] 로그인 실패")
+                    return False
+            else:
+                print("[Wishket] 로그인 확인됨")
+
+            # 지원 폼 URL로 이동
             await self.page.goto(apply_url, timeout=30000)
             try:
                 await self.page.wait_for_load_state("networkidle", timeout=15000)
@@ -451,9 +493,9 @@ class WishketPlatform(BasePlatform):
                 pass
             await asyncio.sleep(3)
 
-            # 로그인 페이지로 리다이렉트됐는지 확인 → 재로그인 시도
-            if "login" in self.page.url:
-                print("[Wishket] 세션 만료 — 재로그인 시도")
+            # 로그인 페이지로 튕겼으면 재로그인 후 재시도
+            if "login" in self.page.url or "/proposal/apply" not in self.page.url:
+                print(f"[Wishket] 지원 폼 접근 실패 (URL: {self.page.url}) — 재로그인 시도")
                 logged_in = await self.login()
                 if not logged_in:
                     print("[Wishket] 재로그인 실패")
@@ -464,9 +506,12 @@ class WishketPlatform(BasePlatform):
                 except Exception:
                     pass
                 await asyncio.sleep(3)
-                if "login" in self.page.url:
-                    print("[Wishket] 재로그인 후에도 지원 폼 접근 불가")
-                    return False
+
+            # 최종 접근 확인
+            if "/proposal/apply" not in self.page.url:
+                print(f"[Wishket] 재로그인 후에도 지원 폼 접근 불가 (URL: {self.page.url})")
+                await self.screenshot("wishket_login_redirect_failed")
+                return False
 
             # 상세 정보 추출: 예상 금액, 예상 기간
             detail = await self.page.evaluate(
@@ -481,13 +526,17 @@ class WishketPlatform(BasePlatform):
             }"""
             )
 
-            # 예산 계산: 공고금액(원) - 150만원 → 원 단위로 입력
+            # 예산 계산: 1000만원 이하 = +100만원, 초과 = -150만원
             propose_budget = ""
             if detail.get("budget"):
                 raw = int(detail["budget"].replace(",", ""))
-                propose_raw = raw - 1500000  # 150만원 차감
+                if raw <= 10000000:
+                    propose_raw = raw + 1000000  # 1000만원 이하: 100만원 추가
+                    print(f"[Wishket] 예산(1000만 이하): {raw:,}원 + 100만 = {propose_raw:,}원")
+                else:
+                    propose_raw = raw - 1500000  # 1000만원 초과: 150만원 차감
+                    print(f"[Wishket] 예산(1000만 초과): {raw:,}원 - 150만 = {propose_raw:,}원")
                 propose_budget = str(propose_raw)
-                print(f"[Wishket] 예산: {raw:,}원 - 150만 = {propose_raw:,}원")
             else:
                 # 협의 후 결정인 경우 1000~3000만원 사이 기본값
                 propose_budget = str(20000000)  # 2000만원

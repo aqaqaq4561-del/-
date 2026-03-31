@@ -125,21 +125,21 @@ class KmongPlatform(BasePlatform):
                     card = self.page.locator(card_selector).nth(i)
                     await card.click()
                     await self.page.wait_for_url(
-                        "**/enterprise/requests/*", timeout=5000
+                        "**/enterprise/requests/*", timeout=15000
                     )
                     detail_url = self.page.url
                     id_match = re.search(r"/requests/(\d+)", detail_url)
                     if not id_match:
                         print(f"[Kmong] 프로젝트 ID 추출 실패 (스킵): {title[:30]}")
                         await self.page.go_back()
-                        await self.page.wait_for_load_state("networkidle", timeout=10000)
-                        await asyncio.sleep(1)
+                        await self.page.wait_for_load_state("networkidle", timeout=15000)
+                        await asyncio.sleep(2)
                         continue
                     pid = id_match.group(1)
 
                     await self.page.go_back()
-                    await self.page.wait_for_load_state("networkidle", timeout=10000)
-                    await asyncio.sleep(1)
+                    await self.page.wait_for_load_state("networkidle", timeout=15000)
+                    await asyncio.sleep(2)
 
                     if self.is_already_applied(pid):
                         continue
@@ -219,13 +219,17 @@ class KmongPlatform(BasePlatform):
                 propose_days = str(days)
                 print(f"[Kmong] 기간: {detail['startDate']}~{detail['endDate']} + 10일 = {days}일")
 
-            # 예산 계산: 공고 예산(만원) - 150
+            # 예산 계산: 1000만원(10,000,000원) 이하 = +100만원, 초과 = -150만원
             propose_budget = ""
             if detail.get("budget"):
                 raw = int(detail["budget"].replace(",", ""))
                 budget_man = raw // 10000  # 원 → 만원
-                propose_budget = str(budget_man - 150)
-                print(f"[Kmong] 예산: {budget_man}만원 - 150 = {propose_budget}만원")
+                if raw <= 10000000:
+                    propose_budget = str(budget_man + 100)
+                    print(f"[Kmong] 예산(1000만 이하): {budget_man}만원 + 100 = {propose_budget}만원")
+                else:
+                    propose_budget = str(budget_man - 150)
+                    print(f"[Kmong] 예산(1000만 초과): {budget_man}만원 - 150 = {propose_budget}만원")
 
             # "제안하기" 버튼 (로그인 상태에서만 활성화)
             apply_btn = self.page.locator(

@@ -149,7 +149,8 @@ class FreemoaPlatform(BasePlatform):
             await asyncio.sleep(3)
 
             # JS로 모든 카드 데이터를 한번에 추출
-            card_data_list = await self.page.evaluate("""() => {
+            card_data_list = await self.page.evaluate(r"""
+            () => {
                 const items = document.querySelectorAll('li.proj-list-item_li_new');
                 return Array.from(items).map(li => {
                     const titleDiv = li.querySelector('div.projTitle');
@@ -164,13 +165,13 @@ class FreemoaPlatform(BasePlatform):
                     const allText = li.textContent || '';
 
                     // 예산: "예상비용5,000 ~ 10,000 만원" 또는 "월 임금300 ~ 500 만원"
-                    const budgetMatch = allText.match(/(?:예상비용|월\\s*임금)\\s*([\\d,]+)\\s*~\\s*([\\d,]+)\\s*만\\s*원/);
+                    const budgetMatch = allText.match(/(?:예상비용|월\s*임금)\s*([\d,]+)\s*~\s*([\d,]+)\s*만\s*원/);
                     const budgetMin = budgetMatch ? budgetMatch[1].replace(/,/g, '') : '';
                     const budgetMax = budgetMatch ? budgetMatch[2].replace(/,/g, '') : '';
-                    const budgetStr = budgetMatch ? budgetMatch[0].replace(/^[^\\d]+/, '').trim() : '';
+                    const budgetStr = budgetMatch ? budgetMatch[0].replace(/^[^\d]+/, '').trim() : '';
 
                     // 기간
-                    const durationMatch = allText.match(/예상기간\\s*(\\d+일)/);
+                    const durationMatch = allText.match(/예상기간\s*(\d+일)/);
                     const duration = durationMatch ? durationMatch[1] : '';
 
                     // li 직계 자식 div.projectInfo들에서 추출
@@ -193,7 +194,8 @@ class FreemoaPlatform(BasePlatform):
                         duration, category, description,
                     };
                 });
-            }""")
+            }
+            """)
 
             if not card_data_list:
                 print("[Freemoa] 프로젝트 카드를 찾지 못함")
@@ -339,11 +341,6 @@ class FreemoaPlatform(BasePlatform):
                 await add_btn.click()
             else:
                 print("[Freemoa] 추가 버튼 못 찾음")
-            clicked = ""
-            if clicked:
-                print(f"[Freemoa] 추가 버튼 클릭: {clicked}")
-            else:
-                print("[Freemoa] '선택한 N개 포트폴리오 추가' 버튼 못 찾음")
 
             await asyncio.sleep(2)
 
@@ -582,11 +579,18 @@ class FreemoaPlatform(BasePlatform):
             dur_days = dur_match.group(1) if dur_match else "60"
 
             if project.budget_min > 0:
-                cost = str(project.budget_min // 10000)
+                raw_cost = project.budget_min
             elif project.budget_max > 0:
-                cost = str(project.budget_max // 10000)
+                raw_cost = project.budget_max
             else:
-                cost = "1000"
+                raw_cost = 20000000  # 2000만원 기본값
+
+            if raw_cost <= 10000000:
+                cost = str((raw_cost + 1000000) // 10000)  # 1000만원 이하: 100만원 추가 (단위: 만원)
+                print(f"[Freemoa] 예산(1000만 이하): {raw_cost:,}원 + 100만 = {cost}만원")
+            else:
+                cost = str((raw_cost - 1500000) // 10000)  # 1000만원 초과: 150만원 차감 (단위: 만원)
+                print(f"[Freemoa] 예산(1000만 초과): {raw_cost:,}원 - 150만 = {cost}만원")
 
             escaped_proposal = proposal_text.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
 

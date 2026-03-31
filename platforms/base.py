@@ -119,9 +119,9 @@ class Project:
             # budget_min이 있으면 이것으로 판단
             pass  # budget_max가 기준 이상이면 OK
 
-        # 제외 키워드
+        # 제외 키워드 (title, description, skills, category 모두 검사)
         exclude = config_filter.get("exclude_keywords", [])
-        text = f"{self.title} {self.description}".lower()
+        text = f"{self.title} {self.description} {self.skills} {self.category}".lower()
         for kw in exclude:
             if kw.lower() in text:
                 return False

@@ -3,12 +3,44 @@ X-Block 맞춤 지원서 생성기 (Claude API 사용)
 """
 import json
 import os
+import re
 from pathlib import Path
 
 try:
     import anthropic
 except ImportError:
     anthropic = None
+
+
+def _sanitize_proposal(text: str) -> str:
+    """지원서에서 금지 항목(회사명, URL, 연락처) 제거"""
+    # 1) URL 제거 — 회사명 치환보다 먼저 (xblock 도메인이 깨지지 않도록)
+    text = re.sub(r'https?://[^\s)"\]]+', '', text)
+    # xblock 관련 도메인 (http 없이 쓰인 경우)
+    text = re.sub(r'xblock[\w.]*\.(com|io|bubbleapps\.io)[/\w]*', '', text, flags=re.IGNORECASE)
+
+    # 2) "아래 링크로 ~" 같은 URL 참조 문구 한 줄 전체 제거
+    text = re.sub(r'아래\s*링크로[^\n]*\n?', '', text)
+    text = re.sub(r'참고\s*부탁\s*드립니다[^\n]*', '감사합니다.', text)
+
+    # 3) 회사명 제거 — 다양한 패턴 처리
+    # "앱 개발 전문 회사 X-Block입니다" → "앱 개발 전문 회사입니다"
+    text = re.sub(r'\s*X-?Block\s*입니다', '입니다', text, flags=re.IGNORECASE)
+    # "X-Block 드림" → ""  (서명이므로 통째로 제거)
+    text = re.sub(r'X-?Block\s*드림', '', text, flags=re.IGNORECASE)
+    # "X-Block에서/은/의/이/을/를" → "저희 팀에서/은/의/이/을/를"
+    # 단, 앞에 "저희"가 이미 있으면 "저희 팀"이 아닌 "팀"만 삽입
+    text = re.sub(r'저희\s+X-?Block\s*(에서|은|의|이|을|를|과|와)', r'저희 팀\1', text, flags=re.IGNORECASE)
+    text = re.sub(r'X-?Block\s*(에서|은|의|이|을|를|과|와)', r'저희 팀\1', text, flags=re.IGNORECASE)
+    # 그 외 남은 X-Block → 빈 문자열
+    text = re.sub(r',?\s*X-?Block', '', text, flags=re.IGNORECASE)
+    text = text.replace('엑스블록', '')
+
+    # 4) 연속 빈 줄 / 불필요한 공백 정리
+    text = re.sub(r'[ \t]+\n', '\n', text)       # 줄 끝 공백 제거
+    text = re.sub(r'\n{3,}', '\n\n', text)        # 3줄 이상 빈줄 → 2줄
+    text = re.sub(r'^\s*\n', '', text)             # 맨 앞 빈 줄 제거
+    return text.strip()
 
 
 def load_company_info():
@@ -92,10 +124,10 @@ def generate_proposal(project_info: dict, api_key: str = None) -> str:
             if last_end > len(result) // 2:  # 절반 이상 있으면 거기까지 자르기
                 result = result[:last_end + 2].rstrip()
             result = result.rstrip() + "\n\n감사합니다."
-        return result
+        return _sanitize_proposal(result)
     except Exception as e:
         print(f"[WARN] 지원서 API 에러: {e}")
-        return _generate_template_proposal(project_info, company)
+        return _sanitize_proposal(_generate_template_proposal(project_info, company))
 
 
 PORTFOLIO_URL = "https://xblocksystem.bubbleapps.io/"
